@@ -1,0 +1,157 @@
+apiVersion: automation.cloudbees.io/v1alpha1
+kind: workflow
+name: SNow_Unify_integration
+
+# Manual ServiceNow change-request test against a developer instance (PDI).
+# Required in Unify before running:
+#   variable: SERVICENOW_URL   (example https://devXXXXXX.service-now.com)
+#   variable: SN_USER          (integration user name)
+#   secret:   SN_PASSWORD
+# Changes vs the original file are marked CHANGED.
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        type: choice
+        description: What to do with the change request
+        options:
+          - create
+          - get
+          - update
+          - close
+        default: create
+      cr-number:
+        type: string
+        description: CR number, for get (example CHG0030002)
+        default: ""
+      sys-id:
+        type: string
+        description: CR sys_id, for update and close
+        default: ""
+      state:
+        type: string
+        description: New state value for update (example -4 = Assess, -3 = Authorize)
+        default: ""
+      close-code:
+        type: string
+        description: Close code for close (successful, successful with issues, unsuccessful)
+        default: successful
+
+jobs:
+  servicenow:
+    steps:
+      # ---------- create ----------
+      - name: Create change request
+        id: create
+        if: ${{ inputs.operation == 'create' }}
+        # CHANGED: action name per docs is service-now
+        uses: https://github.com/cloudbees-io/service-now@v1
+        with:
+          action-type: create
+          url: ${{ vars.SERVICENOW_URL }}
+          username: ${{ vars.SN_USER }}
+          password: ${{ secrets.SN_PASSWORD }}
+          short-description: "UNIFY-TEST created by CloudBees Unify"
+          long-description: "Created by a CloudBees Unify workflow for a ServiceNow integration test"
+          cr-type: normal
+
+      - name: Evidence - change request created
+        if: ${{ inputs.operation == 'create' }}
+        uses: https://github.com/cloudbees-io/publish-evidence-item@v1
+        with:
+          content: |
+            ## ServiceNow change request - created
+            - **Operation:** create
+            - **ServiceNow instance:** ${{ vars.SERVICENOW_URL }}
+
+            ### ServiceNow action output
+            ```
+            ${{ steps.create.outputs.servicenow_output }}
+            ```
+          format: MARKDOWN
+
+      # ---------- get ----------
+      - name: Get change request state
+        id: get
+        if: ${{ inputs.operation == 'get' }}
+        uses: https://github.com/cloudbees-io/service-now@v1
+        with:
+          action-type: get
+          url: ${{ vars.SERVICENOW_URL }}
+          username: ${{ vars.SN_USER }}
+          password: ${{ secrets.SN_PASSWORD }}
+          cr-number: ${{ inputs.cr-number }}
+
+      - name: Evidence - change request state read
+        if: ${{ inputs.operation == 'get' }}
+        uses: https://github.com/cloudbees-io/publish-evidence-item@v1
+        with:
+          content: |
+            ## ServiceNow change request - state read
+            - **CR number requested:** ${{ inputs.cr-number }}
+
+            ### ServiceNow action output
+            ```
+            ${{ steps.get.outputs.servicenow_output }}
+            ```
+          format: MARKDOWN
+
+      # ---------- update ----------
+      - name: Update change request
+        id: update
+        if: ${{ inputs.operation == 'update' }}
+        uses: https://github.com/cloudbees-io/service-now@v1
+        with:
+          action-type: update
+          url: ${{ vars.SERVICENOW_URL }}
+          username: ${{ vars.SN_USER }}
+          password: ${{ secrets.SN_PASSWORD }}
+          sys-id: ${{ inputs.sys-id }}
+          state: ${{ inputs.state }}
+
+      - name: Evidence - change request updated
+        if: ${{ inputs.operation == 'update' }}
+        uses: https://github.com/cloudbees-io/publish-evidence-item@v1
+        with:
+          content: |
+            ## ServiceNow change request - updated
+            - **Requested state value:** ${{ inputs.state }}
+            - **sys_id:** ${{ inputs.sys-id }}
+
+            ### ServiceNow action output
+            ```
+            ${{ steps.update.outputs.servicenow_output }}
+            ```
+          format: MARKDOWN
+
+      # ---------- close ----------
+      - name: Close change request
+        id: close
+        if: ${{ inputs.operation == 'close' }}
+        uses: https://github.com/cloudbees-io/service-now@v1
+        with:
+          action-type: update
+          url: ${{ vars.SERVICENOW_URL }}
+          username: ${{ vars.SN_USER }}
+          password: ${{ secrets.SN_PASSWORD }}
+          sys-id: ${{ inputs.sys-id }}
+          # CHANGED: docs examples use "close"; the original used "3".
+          # If "close" is rejected on your instance, try the numeric value.
+          state: "close"
+          close-code: ${{ inputs.close-code }}
+          close-notes: "Closed by CloudBees Unify workflow (integration test)"
+
+      - name: Evidence - change request closed
+        if: ${{ inputs.operation == 'close' }}
+        uses: https://github.com/cloudbees-io/publish-evidence-item@v1
+        with:
+          content: |
+            ## ServiceNow change request - closed
+            - **Close code:** ${{ inputs.close-code }}
+            - **sys_id:** ${{ inputs.sys-id }}
+
+            ### ServiceNow action output
+            ```
+            ${{ steps.close.outputs.servicenow_output }}
+            ```
+          format: MARKDOWN
